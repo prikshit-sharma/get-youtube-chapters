@@ -20,39 +20,76 @@ function makeChapterParser (startRx, lineRx, timestampIndex, textIndex) {
   textIndex += 1
 
   return function (description) {
-    const chapters = []
+    const chapters = [] // Initialize an empty array to store the chapters
+    const nonEmptyLines = skipEmptyLines(description) // Remove empty lines from the description
+    const firstTimestamp = nonEmptyLines.findIndex((line) => startRx.test(line)) // Find the first line containing a timestamp
 
-    const firstTimestamp = description.search(startRx)
-    if (firstTimestamp === -1) {
+    if (firstTimestamp === -1) { // If no timestamp is found, return an empty array
       return chapters
     }
 
-    const chapterLines = description.slice(firstTimestamp).split('\n')
-    for (let i = 0; i < chapterLines.length; i += 1) {
+    const chapterLines = nonEmptyLines.slice(firstTimestamp) // Extract lines starting from the first timestamp
+    for (let i = 0; i < chapterLines.length; i += 1) { // Loop through each line after the first timestamp
       const line = chapterLines[i]
-
-      const match = lineRx.exec(line)
+      const match = lineRx.exec(line) // Match the line against the provided regex
       if (!match) {
-        break
+        continue // If no match is found, skip the current line
       }
 
-      const hours = match[timestampIndex] !== undefined ? parseInt(match[timestampIndex], 10) : 0
-      const minutes = parseInt(match[timestampIndex + 1], 10)
-      const seconds = parseInt(match[timestampIndex + 2], 10)
-      const title = match[textIndex].trim()
+      // Parse the timestamp and title from the line
+      const { timestamp, title } = parseFlexibleTimestamps(line)
 
+      // Add the parsed chapter to the chapters array
       chapters.push({
-        start: hours * 60 * 60 + minutes * 60 + seconds,
-        title: title.trim()
+        start: timestamp, // The start time of the chapter in seconds
+        title: title.trim() // The title of the chapter, with any surrounding whitespace removed
       })
     }
 
-    return chapters
+    return chapters // Return the array of parsed chapters
   }
 }
 
 /**
- * Add the /m regex flag.
+ * Parses timestamps from a line of text, handling various formats such as `HH:MM:SS`, `[HH:MM:SS]`, or `(HH:MM:SS)`.
+ *
+ * @param {string} line - The line of text potentially containing a timestamp and title.
+ * @returns {object} - An object containing the parsed timestamp in seconds and title text.
+ */
+function parseFlexibleTimestamps (line) {
+  // Regex to capture timestamps in formats like [HH:MM:SS], (HH:MM:SS), and HH:MM:SS
+  const timestampRegex = /(?:\[\s*(?:(\d+):)?(\d+):(\d+)\s*\]|\(\s*(?:(\d+):)?(\d+):(\d+)\s*\)|(?:(\d+):)?(\d+):(\d+))/
+  const match = timestampRegex.exec(line) // Execute the regex to find the timestamp
+
+  if (!match) {
+    return { timestamp: 0, title: line } // If no match, default to 0 for timestamp and return the full line as the title
+  }
+
+  // Parse hours, minutes, and seconds from the matched groups, using '0' as a fallback if the component is missing
+  const hours = parseInt(match[1] || match[4] || match[7] || '0', 10)
+  const minutes = parseInt(match[2] || match[5] || match[8] || '0', 10)
+  const seconds = parseInt(match[3] || match[6] || match[9] || '0', 10)
+  const timestamp = hours * 3600 + minutes * 60 + seconds // Convert the time into seconds
+
+  // Remove the timestamp from the line to extract the title
+  const title = line.replace(timestampRegex, '').replace(/^\d+\.\s*/, '').trim()
+
+  return { timestamp, title } // Return the parsed timestamp in seconds and the chapter title
+}
+
+/**
+ * Splits the input description by line breaks and filters out empty lines.
+ *
+ * @param {string} description - The input chapter description.
+ * @returns {string[]} - An array of non-empty lines from the description.
+ */
+function skipEmptyLines (description) {
+  return description.split('\n').filter((line) => line.trim() !== '') // Split by newlines and filter out empty lines
+}
+
+/**
+ * Adds the `/m` regex flag if it isn't already present.
+ *
  * @param {RegExp} regex
  * @returns {RegExp}
  */
@@ -66,19 +103,25 @@ function addM (regex) {
 // $timestamp $title
 const lawfulParser = makeChapterParser(/^0?0:00/m, /^(?:(\d+):)?(\d+):(\d+)\s+(.*?)$/, 0, 3)
 // [$timestamp] $title
-const bracketsParser = makeChapterParser(/^\[0?0:00\]/m, /^\[(?:(\d+):)?(\d+):(\d+)\]\s+(.*?)$/, 0, 3)
+const bracketsParser = makeChapterParser(/^\[(?:0?0:00|00:00)\]/, /^\[(?:(\d+):)?(\d+):(\d+)\]\s+(.*?)$/, 0, 3)
 // ($timestamp) $title
 const parensParser = makeChapterParser(/^\(0?0:00\)/m, /^\((?:(\d+):)?(\d+):(\d+)\)\s+(.*?)$/, 0, 3)
-// ($track_id. )$title $timestamp
-const postfixRx = /^(?:\d+\.\s+)?(.*)\s+(?:(\d+):)?(\d+):(\d+)$/
+// ($track_id.) $title $timestamp
+const postfixRx = /^(?:\d+\.\s+)?(.*?)\s+(?:(\d+):)?(\d+):(\d+)$/
 const postfixParser = makeChapterParser(addM(postfixRx), postfixRx, 1, 0)
-// ($track_id. )$title ($timestamp)
-const postfixParenRx = /^(?:\d+\.\s+)?(.*)\s+\(\s*(?:(\d+):)?(\d+):(\d+)\s*\)$/
+// ($track_id.) $title ($timestamp)
+const postfixParenRx = /^(?:\d+\.\s+)?(.*?)\s+\(\s*(?:(\d+):)?(\d+):(\d+)\s*\)$/
 const postfixParenParser = makeChapterParser(addM(postfixParenRx), postfixParenRx, 1, 0)
 // $track_id. $timestamp $title
-const prefixRx = /^\d+\.\s+(?:(\d+):)?(\d+):(\d+)\s+(.*)$/
+const prefixRx = /^(?:\d+\.\s+)?(?:(\d+):)?(\d+):(\d+)\s+(.*)$/
 const prefixParser = makeChapterParser(addM(prefixRx), prefixRx, 0, 3)
 
+/**
+ * Parses the YouTube chapter descriptions, matching one of the defined formats.
+ *
+ * @param {string} description - The YouTube video description containing chapter timestamps.
+ * @returns {Array} - The parsed chapters as an array of objects with `start` and `title` properties.
+ */
 module.exports = function parseYouTubeChapters (description) {
   let chapters = lawfulParser(description)
   if (chapters.length === 0) chapters = bracketsParser(description)
