@@ -335,3 +335,44 @@ https://youtu.be/LLF3qELRFkw
   ])
   t.end()
 })
+
+// Testcase to check Empty lines
+test('skipEmptyLines - handles empty lines', function (t) {
+  const chapters = get(`
+00:00 Intro
+
+01:00 Chapter One
+
+02:00 Chapter Two
+
+03:00 Chapter Three
+`)
+  t.deepEqual(chapters, [
+    { start: 0, title: 'Intro' },
+    { start: 60, title: 'Chapter One' },
+    { start: 120, title: 'Chapter Two' },
+    { start: 180, title: 'Chapter Three' }
+  ])
+  t.end()
+})
+
+// Testcase to check flexible Timestamp
+test('parseFlexibleTimestamps - handles flexible timestamp formats', function (t) {
+  const chapters = get(`
+[00:00] Introduction
+
+[00:59] About to End
+
+[01:00] Chapter One
+
+[03:00] Chapter Three
+  `)
+
+  t.deepEqual(chapters, [
+    { start: 0, title: 'Introduction' },
+    { start: 59, title: 'About to End' },
+    { start: 60, title: 'Chapter One' },
+    { start: 180, title: 'Chapter Three' }
+  ])
+  t.end()
+})
